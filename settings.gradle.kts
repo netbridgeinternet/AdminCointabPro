@@ -1,6 +1,6 @@
 pluginManagement {
     repositories {
-        google { content { includeGroupByRegex("com\\.google.*") } }
+        google()
         mavenCentral()
         gradlePluginPortal()
     }
