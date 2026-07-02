@@ -37,9 +37,16 @@ fun AdminApp() {
     val navController = rememberNavController()
     val driveManager = remember { DriveManager(navController.context) }
 
+    // Auto-initialize Drive if account was previously saved
+    LaunchedEffect(Unit) {
+        if (driveManager.wasPreviouslySignedIn() && !driveManager.isInitialized()) {
+            driveManager.initializeDriveFromSaved()
+        }
+    }
+
     NavHost(
         navController = navController,
-        startDestination = if (driveManager.getSignedInAccount() != null && driveManager.isInitialized()) "dashboard" else "signin"
+        startDestination = if (driveManager.wasPreviouslySignedIn() && driveManager.isInitialized()) "dashboard" else "signin"
     ) {
         composable("signin") {
             SignInScreen(

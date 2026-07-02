@@ -1,5 +1,3 @@
-@file:Suppress("DEPRECATION")
-
 package com.urbancointabpro.admin.ui.screens
 
 import androidx.compose.foundation.background
@@ -18,7 +16,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.urbancointabpro.admin.drive.DriveManager
 import com.urbancointabpro.admin.service.DriveSyncService
 import com.urbancointabpro.admin.ui.theme.*
@@ -31,7 +28,7 @@ fun SettingsScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val account = GoogleSignIn.getLastSignedInAccount(context)
+    val accountEmail = driveManager.getAccountEmail()
     var syncInterval by remember { mutableStateOf(30L) }
     var serviceAccountMode by remember { mutableStateOf(false) }
     var serviceAccountEmail by remember { mutableStateOf("") }
@@ -71,8 +68,8 @@ fun SettingsScreen(
                     Icon(Icons.Filled.AccountCircle, null, tint = Accent, modifier = Modifier.size(40.dp))
                     Spacer(Modifier.width(16.dp))
                     Column {
-                        Text(account?.displayName ?: "Unknown", fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text(account?.email ?: "", fontSize = 12.sp, color = TextSecondary)
+                        Text(accountEmail ?: "Unknown", fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text(accountEmail ?: "", fontSize = 12.sp, color = TextSecondary)
                     }
                 }
             }
@@ -102,7 +99,6 @@ fun SettingsScreen(
                                 selected = syncInterval == interval,
                                 onClick = {
                                     syncInterval = interval
-                                    // Update the sync service interval
                                     val intent = android.content.Intent(context, DriveSyncService::class.java)
                                     intent.action = DriveSyncService.ACTION_START
                                     intent.putExtra(DriveSyncService.EXTRA_INTERVAL_SECONDS, interval)
@@ -206,7 +202,7 @@ fun SettingsScreen(
             text = { Text("You'll need to sign in again to access your Drive folder and device photos.") },
             confirmButton = {
                 TextButton(onClick = {
-                    GoogleSignIn.getClient(context, driveManager.getGoogleSignInOptions()).signOut()
+                    driveManager.signOut()
                     onSignOut()
                 }) { Text("Sign Out", color = AccentRed) }
             },

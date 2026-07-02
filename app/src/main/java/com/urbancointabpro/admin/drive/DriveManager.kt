@@ -1,13 +1,9 @@
-@file:Suppress("DEPRECATION")
-
 package com.urbancointabpro.admin.drive
 
+import android.accounts.AccountManager
 import android.content.Context
+import android.content.Intent
 import android.util.Log
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.Scope
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.http.ByteArrayContent
 import com.google.api.client.json.gson.GsonFactory
@@ -43,44 +39,115 @@ class DriveManager(private val context: Context) {
         const val ROOT_FOLDER_NAME = "CointabPro Photos"
         const val MIME_FOLDER = "application/vnd.google-apps.folder"
         const val MIME_IMAGE = "image/jpeg"
+        const val PREFS_NAME = "admin_cointabpro_prefs"
+        const val KEY_ACCOUNT_NAME = "account_name"
     }
 
     private var driveService: Drive? = null
     private var rootFolderId: String? = null
     private var lastChangeToken: String? = null
+    private var credential: GoogleAccountCredential? = null
+    private var accountName: String? = null
 
-    fun getGoogleSignInOptions(): GoogleSignInOptions {
-        // Basic sign-in — just email. Drive API scope is handled separately
-        // by GoogleAccountCredential.usingOAuth2() which shows its own consent dialog.
-        // This avoids DEVELOPER_ERROR (code 10) which occurs when requesting
-        // scopes that require a Google Cloud Console OAuth client configuration.
-        return GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            .build()
+    /**
+     * Get or create the GoogleAccountCredential for Drive API access.
+     * This handles OAuth consent automatically — no Google Cloud Console
+     * OAuth client configuration needed.
+     */
+    fun getCredential(): GoogleAccountCredential {
+        if (credential == null) {
+            credential = GoogleAccountCredential.usingOAuth2(
+                context,
+                Collections.singletonList(DriveScopes.DRIVE)
+            )
+            // Restore previously saved account
+            val saved = getSavedAccountName()
+            if (saved != null) {
+                credential?.selectedAccountName = saved
+                accountName = saved
+            }
+        }
+        return credential!!
     }
 
-    fun initializeDrive(account: GoogleSignInAccount) {
-        val credential = GoogleAccountCredential.usingOAuth2(
-            context,
-            Collections.singletonList(DriveScopes.DRIVE)
-        )
-        credential.selectedAccount = account.account
+    /**
+     * Returns an Intent to launch the account picker.
+     * This is GoogleAccountCredential's built-in picker — works without
+     * any Google Cloud Console configuration.
+     */
+    fun getAccountPickerIntent(): Intent {
+        return getCredential().newChooseAccountIntent()
+    }
+
+    /**
+     * Initialize Drive service after account is selected.
+     */
+    fun initializeDrive(selectedAccountName: String) {
+        accountName = selectedAccountName
+        getCredential().selectedAccountName = selectedAccountName
 
         driveService = Drive.Builder(
             com.google.api.client.http.javanet.NetHttpTransport(),
             GsonFactory.getDefaultInstance(),
-            credential
+            getCredential()
         )
             .setApplicationName("Admin CointabPro")
             .build()
 
-        Log.i(TAG, "Drive service initialized for ${account.email}")
+        // Save account for next launch
+        saveAccountName(selectedAccountName)
+
+        Log.i(TAG, "Drive service initialized for $selectedAccountName")
     }
 
     fun isInitialized(): Boolean = driveService != null
 
-    fun getSignedInAccount(): GoogleSignInAccount? {
-        return GoogleSignIn.getLastSignedInAccount(context)
+    /**
+     * Initialize Drive from a previously saved account name.
+     */
+    fun initializeDriveFromSaved() {
+        val saved = getSavedAccountName() ?: return
+        initializeDrive(saved)
+    }
+
+    /**
+     * Check if user was previously signed in (account saved in prefs).
+     */
+    fun wasPreviouslySignedIn(): Boolean {
+        return getSavedAccountName() != null
+    }
+
+    /**
+     * Get the signed-in account email.
+     */
+    fun getAccountEmail(): String? = accountName
+
+    /**
+     * Sign out — clear saved account and Drive service.
+     */
+    fun signOut() {
+        accountName = null
+        driveService = null
+        rootFolderId = null
+        lastChangeToken = null
+        credential = null
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_ACCOUNT_NAME)
+            .apply()
+        Log.i(TAG, "Signed out")
+    }
+
+    private fun saveAccountName(name: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_ACCOUNT_NAME, name)
+            .apply()
+    }
+
+    private fun getSavedAccountName(): String? {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_ACCOUNT_NAME, null)
     }
 
     /**
@@ -122,14 +189,12 @@ class DriveManager(private val context: Context) {
     }
 
     /**
-     * Share the folder so kiosks (using Service Account or their own Google account)
-     * can create subfolders and upload photos.
+     * Share the folder so kiosks can upload photos.
      */
     private suspend fun shareFolderForUpload(folderId: String) = withContext(Dispatchers.IO) {
         val drive = driveService ?: return@withContext
 
         try {
-            // Allow anyone with link to write
             val permission = Permission().apply {
                 type = "anyone"
                 role = "writer"
@@ -170,14 +235,12 @@ class DriveManager(private val context: Context) {
         val folderId = rootFolderId ?: ensureRootFolder()
         val drive = driveService ?: return@withContext "Not connected"
 
-        val account = getSignedInAccount()
-        val email = account?.email ?: "Unknown"
-        "My Drive (${email}) / $ROOT_FOLDER_NAME /"
+        val email = accountName ?: "Unknown"
+        "My Drive ($email) / $ROOT_FOLDER_NAME /"
     }
 
     /**
      * List all device subfolders in the root folder.
-     * Each subfolder = one connected kiosk device.
      */
     suspend fun listDevices(): List<DeviceInfo> = withContext(Dispatchers.IO) {
         val folderId = rootFolderId ?: ensureRootFolder()
@@ -191,7 +254,6 @@ class DriveManager(private val context: Context) {
             .execute()
 
         result.files.map { folder ->
-            // Count photos and get last photo
             val photos = drive.files().list()
                 .setQ("'${folder.id}' in parents and mimeType='$MIME_IMAGE' and trashed=false")
                 .setSpaces("drive")
@@ -263,15 +325,13 @@ class DriveManager(private val context: Context) {
     }
 
     /**
-     * Power-efficient polling for changes using Drive Changes API.
-     * Returns the number of new changes detected.
+     * Poll for changes using Drive Changes API.
      */
     suspend fun pollForChanges(): Int = withContext(Dispatchers.IO) {
         val drive = driveService ?: return@withContext 0
         val folderId = rootFolderId ?: return@withContext 0
 
         try {
-            // Get the start page token if we don't have one
             if (lastChangeToken == null) {
                 val tokenResponse = drive.changes().getStartPageToken().execute()
                 lastChangeToken = tokenResponse.startPageToken
@@ -279,7 +339,6 @@ class DriveManager(private val context: Context) {
                 return@withContext 0
             }
 
-            // Poll for changes since last token
             var changeCount = 0
             var pageToken = lastChangeToken
 
@@ -288,7 +347,6 @@ class DriveManager(private val context: Context) {
                     .setFields("nextPageToken, newStartPageToken, changes(fileId, file(name, parents, mimeType))")
                     .execute()
 
-                // Filter changes that affect our folder tree
                 for (change in changes.changes ?: emptyList()) {
                     val file = change.file
                     if (file != null && file.parents?.contains(folderId) == true) {
@@ -297,7 +355,6 @@ class DriveManager(private val context: Context) {
                 }
 
                 if (changes.newStartPageToken != null) {
-                    // No more pages
                     lastChangeToken = changes.newStartPageToken
                     pageToken = null
                 } else {
@@ -321,10 +378,9 @@ class DriveManager(private val context: Context) {
      */
     suspend fun getPairingData(): PairingQRData {
         val folderId = rootFolderId ?: ensureRootFolder()
-        val account = getSignedInAccount()
         return PairingQRData(
             folderId = folderId,
-            adminEmail = account?.email ?: "",
+            adminEmail = accountName ?: "",
             folderName = ROOT_FOLDER_NAME
         )
     }

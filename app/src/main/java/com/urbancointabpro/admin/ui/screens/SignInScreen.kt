@@ -1,11 +1,8 @@
-@file:Suppress("DEPRECATION")
-
 package com.urbancointabpro.admin.ui.screens
 
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,9 +18,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount
-import com.google.android.gms.common.api.ApiException
 import com.urbancointabpro.admin.drive.DriveManager
 import com.urbancointabpro.admin.ui.theme.*
 
@@ -35,18 +29,22 @@ fun SignInScreen(
     val context = LocalContext.current
     var isLoading by remember { mutableStateOf(false) }
 
-    val signInLauncher = rememberLauncherForActivityResult(
+    // Launcher for the GoogleAccountCredential account picker
+    val accountPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         isLoading = false
-        try {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            val account: GoogleSignInAccount = task.getResult(ApiException::class.java)
-            driveManager.initializeDrive(account)
-            Toast.makeText(context, "Signed in as ${account.email}", Toast.LENGTH_SHORT).show()
-            onSignedIn()
-        } catch (e: Exception) {
-            Toast.makeText(context, "Sign-in failed: ${e.message}", Toast.LENGTH_LONG).show()
+        if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
+            val accountName = result.data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)
+            if (accountName != null) {
+                driveManager.initializeDrive(accountName)
+                Toast.makeText(context, "Signed in as $accountName", Toast.LENGTH_SHORT).show()
+                onSignedIn()
+            } else {
+                Toast.makeText(context, "No account selected", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(context, "Sign-in cancelled", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -87,8 +85,7 @@ fun SignInScreen(
             Button(
                 onClick = {
                     isLoading = true
-                    val signInIntent = GoogleSignIn.getClient(context, driveManager.getGoogleSignInOptions()).signInIntent
-                    signInLauncher.launch(signInIntent)
+                    accountPickerLauncher.launch(driveManager.getAccountPickerIntent())
                 },
                 modifier = Modifier
                     .fillMaxWidth()
