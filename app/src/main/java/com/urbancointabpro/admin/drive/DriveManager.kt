@@ -15,6 +15,7 @@ import com.google.api.services.drive.model.File
 import com.google.api.services.drive.model.Permission
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.urbancointabpro.admin.pairing.PairingQRData
 import java.util.Collections
 
 data class DeviceInfo(
@@ -315,21 +316,15 @@ class DriveManager(private val context: Context) {
     }
 
     /**
-     * Get the root folder ID for QR pairing.
+     * Get the pairing data for QR code generation.
      */
-    suspend fun getPairingData(): PairingData {
+    suspend fun getPairingData(): PairingQRData {
         val folderId = rootFolderId ?: ensureRootFolder()
         val account = getSignedInAccount()
-        return PairingData(
+        return PairingQRData(
             folderId = folderId,
             adminEmail = account?.email ?: "",
             folderName = ROOT_FOLDER_NAME
         )
     }
 }
-
-data class PairingData(
-    val folderId: String,
-    val adminEmail: String,
-    val folderName: String
-)
