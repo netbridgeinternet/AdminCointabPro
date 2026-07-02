@@ -50,11 +50,12 @@ class DriveManager(private val context: Context) {
     private var lastChangeToken: String? = null
 
     fun getGoogleSignInOptions(): GoogleSignInOptions {
-        // Drive API auth is handled separately by GoogleAccountCredential,
-        // so we don't need requestIdToken() here.
+        // Basic sign-in — just email. Drive API scope is handled separately
+        // by GoogleAccountCredential.usingOAuth2() which shows its own consent dialog.
+        // This avoids DEVELOPER_ERROR (code 10) which occurs when requesting
+        // scopes that require a Google Cloud Console OAuth client configuration.
         return GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
-            .requestScopes(Scope(DriveScopes.DRIVE))
             .build()
     }
 
