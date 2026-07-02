@@ -1,0 +1,25 @@
+{
+  "project_info": {
+    "project_number": "PLACEHOLDER",
+    "project_id": "PLACEHOLDER",
+    "storage_bucket": "PLACEHOLDER"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:PLACEHOLDER:android:PLACEHOLDER",
+        "android_client_info": {
+          "package_name": "com.urbancointabpro.admin"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

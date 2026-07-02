@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Admin CointabPro</string>
+    <string name="sign_in_google">Sign in with Google</string>
+    <string name="drive_connected">Google Drive Connected</string>
+    <string name="drive_not_connected">Google Drive Not Connected</string>
+    <string name="folder_path_label">Storage Path</string>
+    <string name="devices_label">Connected Devices</string>
+    <string name="no_devices">No devices connected yet</string>
+    <string name="pairing_title">Pair a Device</string>
+    <string name="qr_code_desc">Scan this QR code on your CointabPro kiosk to pair</string>
+    <string name="last_photo_label">Last Photo</string>
+    <string name="photo_count_label">Photos</string>
+    <string name="settings_label">Settings</string>
+    <string name="sync_frequency_label">Sync Frequency</string>
+    <string name="service_account_label">Service Account Mode</string>
+    <string name="sign_out_label">Sign Out</string>
+</resources>
