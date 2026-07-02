@@ -50,12 +50,10 @@ class DriveManager(private val context: Context) {
     private var lastChangeToken: String? = null
 
     fun getGoogleSignInOptions(): GoogleSignInOptions {
-        // Uses the web client ID from Google Cloud Console
-        // TODO: Replace with actual web client ID from google-services.json
-        val serverClientId = "YOUR_SERVER_CLIENT_ID"
+        // Drive API auth is handled separately by GoogleAccountCredential,
+        // so we don't need requestIdToken() here.
         return GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
-            .requestIdToken(serverClientId)
             .requestScopes(Scope(DriveScopes.DRIVE))
             .build()
     }
