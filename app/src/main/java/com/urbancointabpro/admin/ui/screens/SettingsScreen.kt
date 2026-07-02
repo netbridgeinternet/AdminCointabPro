@@ -1,9 +1,13 @@
+@file:Suppress("DEPRECATION")
+
 package com.urbancointabpro.admin.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -40,7 +44,7 @@ fun SettingsScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Primary),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, "Back", tint = TextPrimary)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary)
                     }
                 }
             )
@@ -144,7 +148,7 @@ fun SettingsScreen(
                     )
                 }
                 if (serviceAccountMode) {
-                    Divider(color = Color(0xFF333333))
+                    HorizontalDivider(color = Color(0xFF333333))
                     Column(modifier = Modifier.padding(16.dp)) {
                         OutlinedTextField(
                             value = serviceAccountEmail,
@@ -187,7 +191,7 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = AccentRed)
             ) {
-                Icon(Icons.Filled.Logout, null)
+                Icon(Icons.AutoMirrored.Filled.Logout, null)
                 Spacer(Modifier.width(8.dp))
                 Text("Sign Out", fontWeight = FontWeight.Bold)
             }

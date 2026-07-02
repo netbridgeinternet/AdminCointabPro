@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.urbancointabpro.admin.ui.screens
 
 import android.widget.Toast

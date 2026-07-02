@@ -39,6 +39,13 @@ android {
     buildFeatures {
         compose = true
     }
+
+    packaging {
+        resources {
+            merges += "META-INF/INDEX.LIST"
+            merges += "META-INF/DEPENDENCIES"
+        }
+    }
 }
 
 dependencies {
