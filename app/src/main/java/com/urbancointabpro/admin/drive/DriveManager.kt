@@ -47,7 +47,7 @@ class DriveManager(private val context: Context) {
     private var lastChangeToken: String? = null
 
     fun getGoogleSignInOptions(): GoogleSignInOptions {
-        // Uses the web client ID from Firebase/Google Cloud
+        // Uses the web client ID from Google Cloud Console
         // TODO: Replace with actual web client ID from google-services.json
         val serverClientId = "YOUR_SERVER_CLIENT_ID"
         return GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
