@@ -1,5 +1,7 @@
 package com.urbancointabpro.admin.ui.screens
 
+import android.app.Activity
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.urbancointabpro.admin.drive.DriveManager
 import com.urbancointabpro.admin.ui.theme.*
+import kotlinx.coroutines.launch
 
 @Composable
 fun SignInScreen(
@@ -27,24 +30,85 @@ fun SignInScreen(
     onSignedIn: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(false) }
+    var statusMessage by remember { mutableStateOf("") }
 
-    // Launcher for the GoogleAccountCredential account picker
+    // Step 1: Account picker launcher
     val accountPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        isLoading = false
-        if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             val accountName = result.data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)
             if (accountName != null) {
-                driveManager.initializeDrive(accountName)
-                Toast.makeText(context, "Signed in as $accountName", Toast.LENGTH_SHORT).show()
-                onSignedIn()
+                // Account picked — now request Drive consent
+                statusMessage = "Requesting Drive access..."
+                scope.launch {
+                    try {
+                        val consentIntent = driveManager.requestConsentIfNeeded(accountName)
+                        if (consentIntent != null) {
+                            // Consent is needed — launch the consent screen
+                            consentLauncher.launch(consentIntent)
+                        } else {
+                            // Consent already granted — initialize Drive and proceed
+                            driveManager.initializeDrive(accountName)
+                            Toast.makeText(context, "Signed in as $accountName", Toast.LENGTH_SHORT).show()
+                            onSignedIn()
+                        }
+                    } catch (e: Exception) {
+                        isLoading = false
+                        statusMessage = ""
+                        val errorMsg = e.message ?: "${e.javaClass.simpleName}: (no detail)"
+                        Log.e("SignInScreen", "Consent request failed", e)
+                        Toast.makeText(context, "Error: $errorMsg", Toast.LENGTH_LONG).show()
+                    }
+                }
             } else {
+                isLoading = false
+                statusMessage = ""
                 Toast.makeText(context, "No account selected", Toast.LENGTH_SHORT).show()
             }
         } else {
+            isLoading = false
+            statusMessage = ""
             Toast.makeText(context, "Sign-in cancelled", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Step 2: OAuth consent launcher
+    val consentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        // After consent screen, try requesting consent again to confirm it was granted
+        val savedAccount = driveManager.getAccountEmail()
+        if (savedAccount != null) {
+            scope.launch {
+                try {
+                    val consentIntent = driveManager.requestConsentIfNeeded(savedAccount)
+                    if (consentIntent != null) {
+                        // Still needs consent — this shouldn't normally happen
+                        isLoading = false
+                        statusMessage = ""
+                        Toast.makeText(context, "Drive permission still needed. Please try again.", Toast.LENGTH_LONG).show()
+                    } else {
+                        // Consent granted — initialize Drive and proceed
+                        driveManager.initializeDrive(savedAccount)
+                        isLoading = false
+                        statusMessage = ""
+                        Toast.makeText(context, "Drive access granted!", Toast.LENGTH_SHORT).show()
+                        onSignedIn()
+                    }
+                } catch (e: Exception) {
+                    isLoading = false
+                    statusMessage = ""
+                    val errorMsg = e.message ?: "${e.javaClass.simpleName}: (no detail)"
+                    Toast.makeText(context, "Error: $errorMsg", Toast.LENGTH_LONG).show()
+                }
+            }
+        } else {
+            isLoading = false
+            statusMessage = ""
+            Toast.makeText(context, "No account found. Please try again.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -85,13 +149,15 @@ fun SignInScreen(
             Button(
                 onClick = {
                     isLoading = true
+                    statusMessage = "Opening account picker..."
                     accountPickerLauncher.launch(driveManager.getAccountPickerIntent())
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = BlueGmail)
+                colors = ButtonDefaults.buttonColors(containerColor = BlueGmail),
+                enabled = !isLoading
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(
@@ -107,6 +173,18 @@ fun SignInScreen(
                     fontWeight = FontWeight.SemiBold
                 )
             }
+
+            // Status message
+            if (statusMessage.isNotBlank()) {
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    statusMessage,
+                    fontSize = 13.sp,
+                    color = TextSecondary,
+                    textAlign = TextAlign.Center
+                )
+            }
+
             Spacer(Modifier.height(16.dp))
             Text(
                 "Your Google Drive will be used to store\nphotos from your kiosk devices.",

@@ -1,9 +1,13 @@
 package com.urbancointabpro.admin.drive
 
+import android.accounts.Account
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import com.google.android.gms.auth.GoogleAuthException
+import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.UserRecoverableAuthException
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException
 import com.google.api.client.googleapis.json.GoogleJsonResponseException
@@ -16,12 +20,11 @@ import com.google.api.services.drive.Drive
 import com.google.api.services.drive.DriveScopes
 import com.google.api.services.drive.model.File
 import com.google.api.services.drive.model.Permission
-import com.google.android.gms.auth.GoogleAuthException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.urbancointabpro.admin.pairing.PairingQRData
-import java.net.SocketTimeoutException
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.util.Collections
 
 data class DeviceInfo(
@@ -56,6 +59,8 @@ class DriveManager(private val context: Context) {
         const val PREFS_NAME = "admin_cointabpro_prefs"
         const val KEY_ACCOUNT_NAME = "account_name"
         const val REQUEST_CODE_CONSENT = 9002
+        // The scope string for GoogleAuthUtil.getToken()
+        private val DRIVE_SCOPE = DriveScopes.DRIVE
     }
 
     private var driveService: Drive? = null
@@ -91,7 +96,39 @@ class DriveManager(private val context: Context) {
     }
 
     /**
-     * Initialize Drive service after account is selected.
+     * Proactively request OAuth consent for Drive access.
+     * This MUST be called BEFORE any Drive API calls to ensure the user
+     * has granted permission. It uses GoogleAuthUtil.getToken() which
+     * properly throws UserRecoverableAuthException when consent is needed.
+     *
+     * Returns null if consent is already granted (token obtained successfully).
+     * Returns the consent Intent if user needs to grant consent.
+     */
+    suspend fun requestConsentIfNeeded(account: String): Intent? = withContext(Dispatchers.IO) {
+        try {
+            val acct = Account(account, "com.google")
+            // This call triggers the OAuth consent flow if not yet granted.
+            // It MUST be called on a background thread.
+            val token = GoogleAuthUtil.getToken(context, acct, "oauth2:$DRIVE_SCOPE")
+            Log.i(TAG, "Drive consent already granted, token obtained (${token.length} chars)")
+            // Token obtained — consent is already granted
+            null
+        } catch (e: UserRecoverableAuthException) {
+            // Consent is needed — return the intent to show the consent screen
+            Log.i(TAG, "Drive consent required, returning intent")
+            e.intent
+        } catch (e: GoogleAuthException) {
+            Log.e(TAG, "Google auth error during consent check: ${e.javaClass.simpleName}: ${e.message}")
+            // Fatal auth error — can't proceed
+            throw SecurityException("Google authentication failed: ${e.message ?: "The app may need to be registered in Google Cloud Console."}")
+        } catch (e: IOException) {
+            Log.e(TAG, "Network error during consent check: ${e.message}")
+            throw IOException("Network error during sign-in. Please check your internet connection and try again.")
+        }
+    }
+
+    /**
+     * Initialize Drive service after account is selected AND consent is granted.
      */
     fun initializeDrive(selectedAccountName: String) {
         accountName = selectedAccountName
@@ -100,8 +137,6 @@ class DriveManager(private val context: Context) {
         val cred = getCredential()
 
         // Chain BOTH the credential (for OAuth auth headers) AND the timeout initializer.
-        // If we use setHttpRequestInitializer() alone, it overrides the credential
-        // from the constructor, causing 403 "unregistered callers" errors.
         driveService = Drive.Builder(
             NetHttpTransport(),
             GsonFactory.getDefaultInstance(),
@@ -184,37 +219,32 @@ class DriveManager(private val context: Context) {
         return try {
             block()
         } catch (e: UserRecoverableAuthIOException) {
-            Log.w(TAG, "OAuth consent required: ${e.message}")
+            Log.w(TAG, "OAuth consent required (IO): ${e.message}")
             throw DriveConsentRequiredException(e.intent)
-        } catch (e: GoogleAuthException) {
-            // GoogleAuthException is NOT an IOException — it won't be caught by IOException handlers.
-            // Common cause: app not registered in Google Cloud Console, or wrong OAuth scope.
-            Log.e(TAG, "Google auth failed: ${e.javaClass.simpleName}: ${e.message}")
-            throw SecurityException("Google authentication failed: ${e.message ?: "Unknown auth error. The app may need to be registered in Google Cloud Console."}")
         } catch (e: GoogleJsonResponseException) {
-            // Structured Google API errors (403, 404, etc.) with JSON body
             Log.e(TAG, "Drive API error ${e.statusCode}: ${e.message}")
             throw IOException("Drive API error ${e.statusCode}: ${e.details?.errors?.firstOrNull()?.message ?: e.message}")
         } catch (e: SocketTimeoutException) {
             Log.e(TAG, "Drive API timeout: ${e.message}")
             throw IOException("Connection timed out. Please check your internet connection and try again.")
         } catch (e: IOException) {
-            // Generic IO errors — often wraps auth failures on some devices
-            Log.e(TAG, "Drive IO error: ${e.javaClass.simpleName}: ${e.message}")
-            // Check if the cause is a UserRecoverableAuthIOException
-            val cause = e.cause
-            if (cause is UserRecoverableAuthIOException) {
-                throw DriveConsentRequiredException(cause.intent)
+            Log.e(TAG, "Drive IO error: ${e.javaClass.name}: ${e.message}", e)
+            // Walk the cause chain looking for UserRecoverableAuthIOException
+            var cause: Throwable? = e
+            while (cause != null) {
+                if (cause is UserRecoverableAuthIOException) {
+                    Log.w(TAG, "Found UserRecoverableAuthIOException in cause chain")
+                    throw DriveConsentRequiredException(cause.intent)
+                }
+                cause = cause.cause
             }
-            throw IOException(e.message ?: "Network error occurred")
+            throw IOException(e.message ?: "${e.javaClass.simpleName}: (no detail)")
         }
     }
 
     /**
      * Create the root "CointabPro Photos" folder if it doesn't exist.
      * Returns the folder ID.
-     *
-     * Throws DriveConsentRequiredException if OAuth consent is needed.
      */
     suspend fun ensureRootFolder(): String = withContext(Dispatchers.IO) {
         val drive = driveService ?: throw IllegalStateException("Drive not initialized")
@@ -273,7 +303,6 @@ class DriveManager(private val context: Context) {
         val drive = driveService ?: return@withContext
 
         try {
-            // Check if already shared
             val perms = driveExecute {
                 drive.permissions().list(folderId)
                     .setFields("permissions(id, type, role)")
@@ -301,7 +330,7 @@ class DriveManager(private val context: Context) {
             }
             Log.i(TAG, "Folder shared: anyone with link can upload")
         } catch (e: DriveConsentRequiredException) {
-            throw e // Re-throw consent exceptions
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to share folder: ${e.message}")
         }
@@ -349,7 +378,6 @@ class DriveManager(private val context: Context) {
 
         val folderName = "Device-$deviceId"
 
-        // Check if device folder already exists
         val existing = driveExecute {
             drive.files().list()
                 .setQ("name='$folderName' and '$rootId' in parents and mimeType='$MIME_FOLDER' and trashed=false")
@@ -364,7 +392,6 @@ class DriveManager(private val context: Context) {
             return@withContext existingId
         }
 
-        // Create the device subfolder
         val metadata = File().apply {
             name = folderName
             mimeType = MIME_FOLDER
@@ -395,7 +422,6 @@ class DriveManager(private val context: Context) {
             file.webViewLink
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get folder URL: ${e.message}")
-            // Fallback: construct URL manually
             "https://drive.google.com/drive/folders/$folderId"
         }
     }
@@ -404,19 +430,16 @@ class DriveManager(private val context: Context) {
      * Get an Intent to open a Drive folder in the Google Drive app or browser.
      */
     fun getOpenFolderIntent(folderId: String): Intent {
-        // Try opening in Google Drive app first
         val driveIntent = Intent(Intent.ACTION_VIEW).apply {
             data = Uri.parse("https://drive.google.com/drive/folders/$folderId")
             setPackage("com.google.android.apps.docs")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
 
-        // Check if Drive app is available
         val resolveInfo = context.packageManager.resolveActivity(driveIntent, 0)
         return if (resolveInfo != null) {
             driveIntent
         } else {
-            // Fallback to browser
             Intent(Intent.ACTION_VIEW).apply {
                 data = Uri.parse("https://drive.google.com/drive/folders/$folderId")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

@@ -1,11 +1,8 @@
 package com.urbancointabpro.admin.ui.screens
 
-import android.util.Log
-import android.app.Activity
 import android.graphics.Bitmap
+import android.util.Log
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -27,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.urbancointabpro.admin.drive.DriveConsentRequiredException
 import com.urbancointabpro.admin.drive.DriveManager
-import com.urbancointabpro.admin.pairing.PairingQRData
 import com.urbancointabpro.admin.pairing.QRPairingManager
 import com.urbancointabpro.admin.ui.theme.*
 import kotlinx.coroutines.launch
@@ -48,61 +44,6 @@ fun SetupScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var folderCreated by remember { mutableStateOf(false) }
 
-    // State to hold a pending consent intent that needs to be launched
-    var pendingConsentIntent by remember { mutableStateOf<android.content.Intent?>(null) }
-
-    // Launcher for OAuth consent screen — Google requires this on first Drive API access
-    val consentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        // After user grants/denies consent, retry the setup
-        if (result.resultCode == Activity.RESULT_OK) {
-            // User granted consent — retry setup
-            isSettingUp = true
-            error = null
-            scope.launch {
-                try {
-                    withTimeout(60_000L) {
-                        val id = driveManager.ensureRootFolder()
-                        val path = driveManager.getRootFolderPath()
-                        val url = driveManager.getFolderWebUrl(id) ?: ""
-                        val pairingData = driveManager.getPairingData()
-                        val qrManager = QRPairingManager()
-                        val qr = qrManager.generateQRBitmap(pairingData)
-                        folderPath = path
-                        folderId = id
-                        folderUrl = url
-                        qrBitmap = qr
-                        folderCreated = true
-                        isSettingUp = false
-                    }
-                } catch (e: DriveConsentRequiredException) {
-                    // Consent needed again (unusual but possible)
-                    pendingConsentIntent = e.consentIntent
-                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                    error = "Setup timed out. Please check your internet connection and try again."
-                    isSettingUp = false
-                } catch (e: Exception) {
-                    Log.e("SetupScreen", "Setup failed", e)
-                    error = e.message ?: "${e.javaClass.simpleName}: (no message)"
-                    isSettingUp = false
-                }
-            }
-        } else {
-            // User denied consent
-            error = "Google Drive permission was denied. Please grant access to use Drive storage."
-            isSettingUp = false
-        }
-    }
-
-    // Launch consent intent when pendingConsentIntent changes
-    LaunchedEffect(pendingConsentIntent) {
-        pendingConsentIntent?.let { intent ->
-            pendingConsentIntent = null  // Clear to avoid re-triggering
-            consentLauncher.launch(intent)
-        }
-    }
-
     // Main setup logic — runs on first composition
     LaunchedEffect(Unit) {
         try {
@@ -121,14 +62,16 @@ fun SetupScreen(
                 isSettingUp = false
             }
         } catch (e: DriveConsentRequiredException) {
-            // Google needs OAuth consent — trigger the consent screen via state
-            pendingConsentIntent = e.consentIntent
+            // Shouldn't normally happen since consent is handled in SignInScreen,
+            // but handle it just in case
+            error = "Drive permission was lost. Please sign out and sign in again."
+            isSettingUp = false
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             error = "Setup timed out. Please check your internet connection and try again."
             isSettingUp = false
         } catch (e: Exception) {
             Log.e("SetupScreen", "Setup failed", e)
-            error = e.message ?: "${e.javaClass.simpleName}: (no message)"
+            error = e.message ?: "${e.javaClass.simpleName}: (no detail)"
             isSettingUp = false
         }
     }
@@ -144,7 +87,6 @@ fun SetupScreen(
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Header
             Text(
                 "Setup Complete",
                 fontSize = 24.sp,
@@ -184,13 +126,9 @@ fun SetupScreen(
                                     folderCreated = true
                                     isSettingUp = false
                                 }
-                            } catch (e: DriveConsentRequiredException) {
-                                pendingConsentIntent = e.consentIntent
-                            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                                error = "Setup timed out. Please check your internet connection and try again."
-                                isSettingUp = false
                             } catch (e: Exception) {
-                                error = e.message ?: "${e.javaClass.simpleName}: (no message)"
+                                Log.e("SetupScreen", "Retry failed", e)
+                                error = e.message ?: "${e.javaClass.simpleName}: (no detail)"
                                 isSettingUp = false
                             }
                         }
