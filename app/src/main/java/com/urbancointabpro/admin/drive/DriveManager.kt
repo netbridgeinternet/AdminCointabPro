@@ -63,15 +63,6 @@ class DriveManager(private val context: Context) {
     private var accountName: String? = null
 
     /**
-     * HttpRequestInitializer that sets timeouts on every request
-     * to prevent indefinite hangs.
-     */
-    private val timeoutInitializer = HttpRequestInitializer { request: HttpRequest ->
-        request.connectTimeout = 30_000  // 30 seconds to connect
-        request.readTimeout = 60_000     // 60 seconds to read
-    }
-
-    /**
      * Get or create the GoogleAccountCredential for Drive API access.
      */
     fun getCredential(): GoogleAccountCredential {
@@ -104,13 +95,21 @@ class DriveManager(private val context: Context) {
         accountName = selectedAccountName
         getCredential().selectedAccountName = selectedAccountName
 
+        val cred = getCredential()
+
+        // Chain BOTH the credential (for OAuth auth headers) AND the timeout initializer.
+        // If we use setHttpRequestInitializer() alone, it overrides the credential
+        // from the constructor, causing 403 "unregistered callers" errors.
         driveService = Drive.Builder(
             NetHttpTransport(),
             GsonFactory.getDefaultInstance(),
-            getCredential()
+            HttpRequestInitializer { request ->
+                cred.initialize(request)       // Set OAuth authentication headers
+                request.connectTimeout = 30_000 // 30 seconds to connect
+                request.readTimeout = 60_000    // 60 seconds to read
+            }
         )
             .setApplicationName("Admin CointabPro")
-            .setHttpRequestInitializer(timeoutInitializer)
             .build()
 
         // Save account for next launch
