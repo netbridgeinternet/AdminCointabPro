@@ -1,5 +1,6 @@
 package com.urbancointabpro.admin.ui.screens
 
+import android.util.Log
 import android.app.Activity
 import android.graphics.Bitmap
 import android.widget.Toast
@@ -82,7 +83,8 @@ fun SetupScreen(
                     error = "Setup timed out. Please check your internet connection and try again."
                     isSettingUp = false
                 } catch (e: Exception) {
-                    error = e.message ?: "Unknown error occurred"
+                    Log.e("SetupScreen", "Setup failed", e)
+                    error = e.message ?: "${e.javaClass.simpleName}: (no message)"
                     isSettingUp = false
                 }
             }
@@ -125,7 +127,8 @@ fun SetupScreen(
             error = "Setup timed out. Please check your internet connection and try again."
             isSettingUp = false
         } catch (e: Exception) {
-            error = e.message ?: "Unknown error occurred"
+            Log.e("SetupScreen", "Setup failed", e)
+            error = e.message ?: "${e.javaClass.simpleName}: (no message)"
             isSettingUp = false
         }
     }
@@ -187,7 +190,7 @@ fun SetupScreen(
                                 error = "Setup timed out. Please check your internet connection and try again."
                                 isSettingUp = false
                             } catch (e: Exception) {
-                                error = e.message ?: "Unknown error occurred"
+                                error = e.message ?: "${e.javaClass.simpleName}: (no message)"
                                 isSettingUp = false
                             }
                         }

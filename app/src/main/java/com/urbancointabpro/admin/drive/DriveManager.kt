@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException
+import com.google.api.client.googleapis.json.GoogleJsonResponseException
 import com.google.api.client.http.ByteArrayContent
 import com.google.api.client.http.HttpRequest
 import com.google.api.client.http.HttpRequestInitializer
@@ -15,6 +16,7 @@ import com.google.api.services.drive.Drive
 import com.google.api.services.drive.DriveScopes
 import com.google.api.services.drive.model.File
 import com.google.api.services.drive.model.Permission
+import com.google.android.gms.auth.GoogleAuthException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.urbancointabpro.admin.pairing.PairingQRData
@@ -174,9 +176,9 @@ class DriveManager(private val context: Context) {
     }
 
     /**
-     * Execute a Drive API call, catching UserRecoverableAuthIOException
-     * and wrapping it in DriveConsentRequiredException so the UI can
-     * launch the consent intent.
+     * Execute a Drive API call, catching all authentication-related exceptions
+     * and wrapping them appropriately so the UI can handle consent or show
+     * meaningful error messages.
      */
     private fun <T> driveExecute(block: () -> T): T {
         return try {
@@ -184,9 +186,27 @@ class DriveManager(private val context: Context) {
         } catch (e: UserRecoverableAuthIOException) {
             Log.w(TAG, "OAuth consent required: ${e.message}")
             throw DriveConsentRequiredException(e.intent)
+        } catch (e: GoogleAuthException) {
+            // GoogleAuthException is NOT an IOException — it won't be caught by IOException handlers.
+            // Common cause: app not registered in Google Cloud Console, or wrong OAuth scope.
+            Log.e(TAG, "Google auth failed: ${e.javaClass.simpleName}: ${e.message}")
+            throw SecurityException("Google authentication failed: ${e.message ?: "Unknown auth error. The app may need to be registered in Google Cloud Console."}")
+        } catch (e: GoogleJsonResponseException) {
+            // Structured Google API errors (403, 404, etc.) with JSON body
+            Log.e(TAG, "Drive API error ${e.statusCode}: ${e.message}")
+            throw IOException("Drive API error ${e.statusCode}: ${e.details?.errors?.firstOrNull()?.message ?: e.message}")
         } catch (e: SocketTimeoutException) {
             Log.e(TAG, "Drive API timeout: ${e.message}")
-            throw java.io.IOException("Connection timed out. Please check your internet connection and try again.")
+            throw IOException("Connection timed out. Please check your internet connection and try again.")
+        } catch (e: java.io.IOException) {
+            // Generic IO errors — often wraps auth failures on some devices
+            Log.e(TAG, "Drive IO error: ${e.javaClass.simpleName}: ${e.message}")
+            // Check if the cause is a UserRecoverableAuthIOException
+            val cause = e.cause
+            if (cause is UserRecoverableAuthIOException) {
+                throw DriveConsentRequiredException(cause.intent)
+            }
+            throw IOException(e.message ?: "Network error occurred")
         }
     }
 
