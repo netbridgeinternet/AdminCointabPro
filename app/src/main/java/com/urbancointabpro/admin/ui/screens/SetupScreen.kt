@@ -3,6 +3,7 @@ package com.urbancointabpro.admin.ui.screens
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -11,8 +12,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -27,17 +31,22 @@ fun SetupScreen(
     driveManager: DriveManager,
     onSetupComplete: () -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var folderPath by remember { mutableStateOf("Setting up...") }
     var folderId by remember { mutableStateOf("") }
+    var folderUrl by remember { mutableStateOf("") }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isSettingUp by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var folderCreated by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         try {
             folderId = driveManager.ensureRootFolder()
             folderPath = driveManager.getRootFolderPath()
+            folderUrl = driveManager.getFolderWebUrl(folderId) ?: ""
+            folderCreated = true
 
             // Generate QR code
             val pairingData = driveManager.getPairingData()
@@ -79,28 +88,120 @@ fun SetupScreen(
                 Icon(Icons.Filled.Error, null, tint = AccentRed, modifier = Modifier.size(48.dp))
                 Spacer(Modifier.height(16.dp))
                 Text("Error: $error", color = AccentRed)
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = {
+                        isSettingUp = true
+                        error = null
+                        scope.launch {
+                            try {
+                                folderId = driveManager.ensureRootFolder()
+                                folderPath = driveManager.getRootFolderPath()
+                                folderUrl = driveManager.getFolderWebUrl(folderId) ?: ""
+                                folderCreated = true
+                                val pairingData = driveManager.getPairingData()
+                                val qrManager = QRPairingManager()
+                                qrBitmap = qrManager.generateQRBitmap(pairingData)
+                                isSettingUp = false
+                            } catch (e: Exception) {
+                                error = e.message
+                                isSettingUp = false
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent)
+                ) {
+                    Icon(Icons.Filled.Refresh, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Retry")
+                }
             } else {
-                // Storage path card
+                // ── Storage path card (CLICKABLE) ──────────────────
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (folderId.isNotBlank()) {
+                                val intent = driveManager.getOpenFolderIntent(folderId)
+                                context.startActivity(intent)
+                            }
+                        }
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Filled.Folder, null, tint = Accent)
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Accent.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                if (folderCreated) Icons.Filled.Folder else Icons.Filled.FolderOff,
+                                null,
+                                tint = if (folderCreated) Accent else AccentRed,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                         Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("Storage Path", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 14.sp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Storage Path", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 14.sp)
+                                Spacer(Modifier.width(8.dp))
+                                if (folderCreated) {
+                                    Icon(Icons.Filled.CheckCircle, null, tint = AccentGreen, modifier = Modifier.size(14.dp))
+                                }
+                            }
                             Text(folderPath, fontSize = 12.sp, color = TextSecondary)
+                            if (folderCreated) {
+                                Spacer(Modifier.height(2.dp))
+                                Text("Tap to open in Google Drive", fontSize = 10.sp, color = Accent)
+                            }
+                        }
+                        Icon(
+                            Icons.Filled.OpenInNew,
+                            null,
+                            tint = Accent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+
+                // ── Folder ID card ─────────────────────────────────
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2332)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.Key, null, tint = Color(0xFF64B5F6), modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Folder ID", fontSize = 10.sp, color = TextSecondary)
+                            Text(folderId, fontSize = 11.sp, color = Color(0xFF64B5F6), fontFamily = FontFamily.Monospace)
+                        }
+                        IconButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Folder ID", folderId))
+                            }
+                        ) {
+                            Icon(Icons.Filled.ContentCopy, "Copy", tint = TextSecondary, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(16.dp))
 
-                // QR Code for pairing
+                // ── QR Code for pairing ────────────────────────────
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = SurfaceCard),
@@ -112,25 +213,23 @@ fun SetupScreen(
                     ) {
                         Icon(Icons.Filled.QrCode2, null, tint = Accent, modifier = Modifier.size(32.dp))
                         Spacer(Modifier.height(8.dp))
-                        Text("Pair a Device", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
+                        Text("Legacy Pairing QR", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
                         Spacer(Modifier.height(4.dp))
-                        Text("Scan this QR code on your CointabPro kiosk", fontSize = 12.sp, color = TextSecondary)
+                        Text("For kiosks that scan admin QR codes", fontSize = 12.sp, color = TextSecondary)
                         Spacer(Modifier.height(16.dp))
 
                         qrBitmap?.let { bitmap ->
                             Image(
                                 bitmap = bitmap.asImageBitmap(),
                                 contentDescription = "Pairing QR Code",
-                                modifier = Modifier.size(240.dp)
+                                modifier = Modifier.size(200.dp)
                             )
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Text("Folder ID: $folderId", fontSize = 10.sp, color = TextSecondary)
                     }
                 }
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(16.dp))
 
-                // Service account email sharing
+                // ── Service account email sharing ──────────────────
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = SurfaceCard),
@@ -149,7 +248,7 @@ fun SetupScreen(
                 }
                 Spacer(Modifier.height(32.dp))
 
-                // Continue button
+                // ── Continue button ────────────────────────────────
                 Button(
                     onClick = onSetupComplete,
                     modifier = Modifier

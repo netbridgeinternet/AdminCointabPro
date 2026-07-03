@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "296670258734",
+    "project_id": "newurbancointabpro",
+    "storage_bucket": "newurbancointabpro.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:296670258734:android:4e96b1d14cec00a1cfa1bf",
+        "android_client_info": {
+          "package_name": "com.urbancointabpro.kiosk"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAon9oW3g-TAMZ5Hp4I_tOr6YhNxNHJw5M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:296670258734:android:a1b2c3d4e5f6a7b8c9d0",
+        "android_client_info": {
+          "package_name": "com.urbancointabpro.admin"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAon9oW3g-TAMZ5Hp4I_tOr6YhNxNHJw5M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

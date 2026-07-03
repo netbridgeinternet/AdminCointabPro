@@ -32,7 +32,8 @@ import java.util.*
 fun DashboardScreen(
     driveManager: DriveManager,
     onDeviceClick: (String, String) -> Unit,
-    onSettingsClick: () -> Unit
+    onSettingsClick: () -> Unit,
+    onPairDeviceClick: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var devices by remember { mutableStateOf<List<DeviceInfo>>(emptyList()) }
@@ -83,6 +84,16 @@ fun DashboardScreen(
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onPairDeviceClick,
+                containerColor = Accent,
+                contentColor = Primary,
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Filled.Add, "Pair Device")
+            }
         }
     ) { padding ->
         Box(
@@ -108,9 +119,20 @@ fun DashboardScreen(
                         modifier = Modifier.size(64.dp)
                     )
                     Spacer(Modifier.height(16.dp))
-                    Text("No devices connected yet", color = TextSecondary, fontSize = 16.sp)
+                    Text("No devices paired yet", color = TextSecondary, fontSize = 16.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text("Pair a kiosk device using the QR code", color = TextSecondary, fontSize = 12.sp)
+                    Text("Tap + to pair a kiosk device", color = TextSecondary, fontSize = 12.sp)
+                    Spacer(Modifier.height(24.dp))
+                    OutlinedButton(
+                        onClick = onPairDeviceClick,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Accent)
+                    ) {
+                        Icon(Icons.Filled.QrCodeScanner, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Pair a Device")
+                    }
                 }
             } else {
                 LazyColumn(

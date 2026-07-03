@@ -3,6 +3,7 @@ package com.urbancointabpro.admin.drive
 import android.accounts.AccountManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.http.ByteArrayContent
@@ -123,6 +124,11 @@ class DriveManager(private val context: Context) {
     fun getAccountEmail(): String? = accountName
 
     /**
+     * Get the root folder ID.
+     */
+    fun getRootFolderId(): String? = rootFolderId
+
+    /**
      * Sign out — clear saved account and Drive service.
      */
     fun signOut() {
@@ -167,6 +173,14 @@ class DriveManager(private val context: Context) {
         if (existing.files.isNotEmpty()) {
             rootFolderId = existing.files[0].id
             Log.i(TAG, "Root folder exists: $rootFolderId")
+
+            // Ensure sharing is set up even for existing folders
+            try {
+                shareFolderForUpload(rootFolderId!!)
+            } catch (e: Exception) {
+                Log.w(TAG, "Folder may already be shared: ${e.message}")
+            }
+
             return@withContext rootFolderId!!
         }
 
@@ -176,7 +190,7 @@ class DriveManager(private val context: Context) {
             mimeType = MIME_FOLDER
         }
         val folder = drive.files().create(metadata)
-            .setFields("id, name")
+            .setFields("id, name, webViewLink")
             .execute()
 
         rootFolderId = folder.id
@@ -195,6 +209,20 @@ class DriveManager(private val context: Context) {
         val drive = driveService ?: return@withContext
 
         try {
+            // Check if already shared
+            val perms = drive.permissions().list(folderId)
+                .setFields("permissions(id, type, role)")
+                .execute()
+
+            val alreadyShared = perms.permissions.any {
+                it.type == "anyone" && it.role == "writer"
+            }
+
+            if (alreadyShared) {
+                Log.i(TAG, "Folder already shared: anyone with link can upload")
+                return@withContext
+            }
+
             val permission = Permission().apply {
                 type = "anyone"
                 role = "writer"
@@ -237,6 +265,85 @@ class DriveManager(private val context: Context) {
 
         val email = accountName ?: "Unknown"
         "My Drive ($email) / $ROOT_FOLDER_NAME /"
+    }
+
+    /**
+     * Create a device subfolder in the root folder.
+     * Returns the device folder ID.
+     */
+    suspend fun createDeviceFolder(deviceId: String): String = withContext(Dispatchers.IO) {
+        val rootId = rootFolderId ?: ensureRootFolder()
+        val drive = driveService ?: throw IllegalStateException("Drive not initialized")
+
+        val folderName = "Device-$deviceId"
+
+        // Check if device folder already exists
+        val existing = drive.files().list()
+            .setQ("name='$folderName' and '$rootId' in parents and mimeType='$MIME_FOLDER' and trashed=false")
+            .setSpaces("drive")
+            .setFields("files(id, name)")
+            .execute()
+
+        if (existing.files.isNotEmpty()) {
+            val existingId = existing.files[0].id
+            Log.i(TAG, "Device folder already exists: $existingId")
+            return@withContext existingId
+        }
+
+        // Create the device subfolder
+        val metadata = File().apply {
+            name = folderName
+            mimeType = MIME_FOLDER
+            parents = listOf(rootId)
+        }
+        val folder = drive.files().create(metadata)
+            .setFields("id, name, webViewLink")
+            .execute()
+
+        Log.i(TAG, "Created device folder: ${folder.id} ($folderName)")
+        folder.id
+    }
+
+    /**
+     * Get the web URL to open a Drive folder in browser.
+     */
+    suspend fun getFolderWebUrl(folderId: String): String? = withContext(Dispatchers.IO) {
+        val drive = driveService ?: return@withContext null
+
+        try {
+            val file = drive.files().get(folderId)
+                .setFields("webViewLink")
+                .execute()
+            file.webViewLink
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get folder URL: ${e.message}")
+            // Fallback: construct URL manually
+            "https://drive.google.com/drive/folders/$folderId"
+        }
+    }
+
+    /**
+     * Get an Intent to open a Drive folder in the Google Drive app or browser.
+     */
+    fun getOpenFolderIntent(folderId: String): Intent {
+        // Try opening in Google Drive app first
+        val driveIntent = Intent(Intent.ACTION_VIEW).apply {
+            data = Uri.parse("https://drive.google.com/drive/folders/$folderId")
+            setPackage("com.google.android.apps.docs")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        // Check if Drive app is available
+        val resolveInfo = context.packageManager.resolveActivity(driveIntent, 0)
+        return if (resolveInfo != null) {
+            driveIntent
+        } else {
+            // Fallback to browser
+            Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse("https://drive.google.com/drive/folders/$folderId")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
     }
 
     /**

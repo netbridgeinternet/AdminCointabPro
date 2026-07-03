@@ -4,6 +4,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
 }
 
 // Load keystore properties from keystore.properties file
@@ -21,8 +22,8 @@ android {
         applicationId = "com.urbancointabpro.admin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -95,10 +96,14 @@ dependencies {
     implementation("com.google.http-client:google-http-client-gson:1.45.1")
     implementation("com.google.apis:google-api-services-drive:v3-rev20241027-2.0.0")
 
+    // Firebase (Firestore for pairing data)
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-firestore")
+
     // Coil for image loading
     implementation("io.coil-kt:coil-compose:2.7.0")
 
-    // QR Code generation
+    // QR Code generation + scanning
     implementation("com.google.zxing:core:3.5.3")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 

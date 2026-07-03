@@ -76,6 +76,20 @@ fun AdminApp() {
                 },
                 onSettingsClick = {
                     navController.navigate("settings")
+                },
+                onPairDeviceClick = {
+                    navController.navigate("pair_device")
+                }
+            )
+        }
+        composable("pair_device") {
+            PairDeviceScreen(
+                driveManager = driveManager,
+                onBack = { navController.popBackStack() },
+                onDevicePaired = { folderId, deviceName ->
+                    navController.navigate("device/$folderId/$deviceName") {
+                        popUpTo("dashboard")
+                    }
                 }
             )
         }
