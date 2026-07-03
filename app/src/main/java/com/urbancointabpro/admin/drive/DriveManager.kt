@@ -238,7 +238,17 @@ class DriveManager(private val context: Context) {
                 }
                 cause = cause.cause
             }
-            throw IOException(e.message ?: "${e.javaClass.simpleName}: (no detail)")
+            // Build a detailed error message including the full cause chain
+            val causeChain = buildString {
+                var c: Throwable? = e.cause
+                while (c != null) {
+                    append(" → ${c.javaClass.simpleName}")
+                    if (c.message != null) append(": ${c.message}")
+                    c = c.cause
+                }
+            }
+            val detail = e.message ?: "${e.javaClass.simpleName}: (no message)"
+            throw IOException("$detail$causeChain")
         }
     }
 

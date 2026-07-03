@@ -33,6 +33,47 @@ fun SignInScreen(
     val scope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("") }
+    var pendingAccountName by remember { mutableStateOf<String?>(null) }
+
+    // Step 2: OAuth consent launcher — MUST be declared before accountPickerLauncher
+    // because accountPickerLauncher's callback references consentLauncher.
+    val consentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        // After consent screen, try requesting consent again to confirm it was granted
+        // Use the pendingAccountName saved from the account picker (getAccountEmail() won't work yet
+        // because initializeDrive() hasn't been called).
+        val savedAccount = pendingAccountName
+        if (savedAccount != null) {
+            scope.launch {
+                try {
+                    val consentIntent = driveManager.requestConsentIfNeeded(savedAccount)
+                    if (consentIntent != null) {
+                        // Still needs consent — this shouldn't normally happen
+                        isLoading = false
+                        statusMessage = ""
+                        Toast.makeText(context, "Drive permission still needed. Please try again.", Toast.LENGTH_LONG).show()
+                    } else {
+                        // Consent granted — initialize Drive and proceed
+                        driveManager.initializeDrive(savedAccount)
+                        isLoading = false
+                        statusMessage = ""
+                        Toast.makeText(context, "Drive access granted!", Toast.LENGTH_SHORT).show()
+                        onSignedIn()
+                    }
+                } catch (e: Exception) {
+                    isLoading = false
+                    statusMessage = ""
+                    val errorMsg = e.message ?: "${e.javaClass.simpleName}: (no detail)"
+                    Toast.makeText(context, "Error: $errorMsg", Toast.LENGTH_LONG).show()
+                }
+            }
+        } else {
+            isLoading = false
+            statusMessage = ""
+            Toast.makeText(context, "No account found. Please try again.", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Step 1: Account picker launcher
     val accountPickerLauncher = rememberLauncherForActivityResult(
@@ -41,6 +82,8 @@ fun SignInScreen(
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             val accountName = result.data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)
             if (accountName != null) {
+                // Save account name so consentLauncher can use it later
+                pendingAccountName = accountName
                 // Account picked — now request Drive consent
                 statusMessage = "Requesting Drive access..."
                 scope.launch {
@@ -72,43 +115,6 @@ fun SignInScreen(
             isLoading = false
             statusMessage = ""
             Toast.makeText(context, "Sign-in cancelled", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    // Step 2: OAuth consent launcher
-    val consentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        // After consent screen, try requesting consent again to confirm it was granted
-        val savedAccount = driveManager.getAccountEmail()
-        if (savedAccount != null) {
-            scope.launch {
-                try {
-                    val consentIntent = driveManager.requestConsentIfNeeded(savedAccount)
-                    if (consentIntent != null) {
-                        // Still needs consent — this shouldn't normally happen
-                        isLoading = false
-                        statusMessage = ""
-                        Toast.makeText(context, "Drive permission still needed. Please try again.", Toast.LENGTH_LONG).show()
-                    } else {
-                        // Consent granted — initialize Drive and proceed
-                        driveManager.initializeDrive(savedAccount)
-                        isLoading = false
-                        statusMessage = ""
-                        Toast.makeText(context, "Drive access granted!", Toast.LENGTH_SHORT).show()
-                        onSignedIn()
-                    }
-                } catch (e: Exception) {
-                    isLoading = false
-                    statusMessage = ""
-                    val errorMsg = e.message ?: "${e.javaClass.simpleName}: (no detail)"
-                    Toast.makeText(context, "Error: $errorMsg", Toast.LENGTH_LONG).show()
-                }
-            }
-        } else {
-            isLoading = false
-            statusMessage = ""
-            Toast.makeText(context, "No account found. Please try again.", Toast.LENGTH_SHORT).show()
         }
     }
 
