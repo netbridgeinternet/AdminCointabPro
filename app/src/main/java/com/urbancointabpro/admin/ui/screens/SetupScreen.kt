@@ -47,6 +47,9 @@ fun SetupScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var folderCreated by remember { mutableStateOf(false) }
 
+    // State to hold a pending consent intent that needs to be launched
+    var pendingConsentIntent by remember { mutableStateOf<android.content.Intent?>(null) }
+
     // Launcher for OAuth consent screen — Google requires this on first Drive API access
     val consentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -57,20 +60,31 @@ fun SetupScreen(
             isSettingUp = true
             error = null
             scope.launch {
-                performSetup(driveManager, onSetupComplete = { path, id, url, bitmap ->
-                    folderPath = path
-                    folderId = id
-                    folderUrl = url
-                    qrBitmap = bitmap
-                    folderCreated = true
+                try {
+                    withTimeout(60_000L) {
+                        val id = driveManager.ensureRootFolder()
+                        val path = driveManager.getRootFolderPath()
+                        val url = driveManager.getFolderWebUrl(id) ?: ""
+                        val pairingData = driveManager.getPairingData()
+                        val qrManager = QRPairingManager()
+                        val qr = qrManager.generateQRBitmap(pairingData)
+                        folderPath = path
+                        folderId = id
+                        folderUrl = url
+                        qrBitmap = qr
+                        folderCreated = true
+                        isSettingUp = false
+                    }
+                } catch (e: DriveConsentRequiredException) {
+                    // Consent needed again (unusual but possible)
+                    pendingConsentIntent = e.consentIntent
+                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                    error = "Setup timed out. Please check your internet connection and try again."
                     isSettingUp = false
-                }, onError = { msg ->
-                    error = msg
+                } catch (e: Exception) {
+                    error = e.message ?: "Unknown error occurred"
                     isSettingUp = false
-                }, onConsentRequired = { consentIntent ->
-                    // Shouldn't happen again after consent, but handle just in case
-                    consentLauncher.launch(consentIntent)
-                })
+                }
             }
         } else {
             // User denied consent
@@ -79,22 +93,41 @@ fun SetupScreen(
         }
     }
 
+    // Launch consent intent when pendingConsentIntent changes
+    LaunchedEffect(pendingConsentIntent) {
+        pendingConsentIntent?.let { intent ->
+            pendingConsentIntent = null  // Clear to avoid re-triggering
+            consentLauncher.launch(intent)
+        }
+    }
+
     // Main setup logic — runs on first composition
     LaunchedEffect(Unit) {
-        performSetup(driveManager, onSetupComplete = { path, id, url, bitmap ->
-            folderPath = path
-            folderId = id
-            folderUrl = url
-            qrBitmap = bitmap
-            folderCreated = true
+        try {
+            withTimeout(60_000L) {
+                val id = driveManager.ensureRootFolder()
+                val path = driveManager.getRootFolderPath()
+                val url = driveManager.getFolderWebUrl(id) ?: ""
+                val pairingData = driveManager.getPairingData()
+                val qrManager = QRPairingManager()
+                val qr = qrManager.generateQRBitmap(pairingData)
+                folderPath = path
+                folderId = id
+                folderUrl = url
+                qrBitmap = qr
+                folderCreated = true
+                isSettingUp = false
+            }
+        } catch (e: DriveConsentRequiredException) {
+            // Google needs OAuth consent — trigger the consent screen via state
+            pendingConsentIntent = e.consentIntent
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            error = "Setup timed out. Please check your internet connection and try again."
             isSettingUp = false
-        }, onError = { msg ->
-            error = msg
+        } catch (e: Exception) {
+            error = e.message ?: "Unknown error occurred"
             isSettingUp = false
-        }, onConsentRequired = { consentIntent ->
-            // Launch the OAuth consent screen
-            consentLauncher.launch(consentIntent)
-        })
+        }
     }
 
     Box(
@@ -133,19 +166,30 @@ fun SetupScreen(
                         isSettingUp = true
                         error = null
                         scope.launch {
-                            performSetup(driveManager, onSetupComplete = { path, id, url, bitmap ->
-                                folderPath = path
-                                folderId = id
-                                folderUrl = url
-                                qrBitmap = bitmap
-                                folderCreated = true
+                            try {
+                                withTimeout(60_000L) {
+                                    val id = driveManager.ensureRootFolder()
+                                    val path = driveManager.getRootFolderPath()
+                                    val url = driveManager.getFolderWebUrl(id) ?: ""
+                                    val pairingData = driveManager.getPairingData()
+                                    val qrManager = QRPairingManager()
+                                    val qr = qrManager.generateQRBitmap(pairingData)
+                                    folderPath = path
+                                    folderId = id
+                                    folderUrl = url
+                                    qrBitmap = qr
+                                    folderCreated = true
+                                    isSettingUp = false
+                                }
+                            } catch (e: DriveConsentRequiredException) {
+                                pendingConsentIntent = e.consentIntent
+                            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                                error = "Setup timed out. Please check your internet connection and try again."
                                 isSettingUp = false
-                            }, onError = { msg ->
-                                error = msg
+                            } catch (e: Exception) {
+                                error = e.message ?: "Unknown error occurred"
                                 isSettingUp = false
-                            }, onConsentRequired = { consentIntent ->
-                                consentLauncher.launch(consentIntent)
-                            })
+                            }
                         }
                     },
                     shape = RoundedCornerShape(12.dp),
@@ -307,37 +351,5 @@ fun SetupScreen(
                 }
             }
         }
-    }
-}
-
-/**
- * Perform the Drive setup: create root folder, get path, generate QR.
- * Handles DriveConsentRequiredException by launching the OAuth consent screen.
- *
- * Uses a 60-second timeout to prevent indefinite hangs.
- */
-private suspend fun performSetup(
-    driveManager: DriveManager,
-    onSetupComplete: (path: String, id: String, url: String, qr: Bitmap?) -> Unit,
-    onError: (msg: String) -> Unit,
-    onConsentRequired: (android.content.Intent) -> Unit
-) {
-    try {
-        withTimeout(60_000L) { // 60 second timeout
-            val id = driveManager.ensureRootFolder()
-            val path = driveManager.getRootFolderPath()
-            val url = driveManager.getFolderWebUrl(id) ?: ""
-            val pairingData = driveManager.getPairingData()
-            val qrManager = QRPairingManager()
-            val qr = qrManager.generateQRBitmap(pairingData)
-            onSetupComplete(path, id, url, qr)
-        }
-    } catch (e: DriveConsentRequiredException) {
-        // Google needs OAuth consent — launch the consent screen
-        onConsentRequired(e.consentIntent)
-    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-        onError("Setup timed out. Please check your internet connection and try again.")
-    } catch (e: Exception) {
-        onError(e.message ?: "Unknown error occurred")
     }
 }

@@ -7,6 +7,8 @@ import android.util.Log
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException
 import com.google.api.client.http.ByteArrayContent
+import com.google.api.client.http.HttpRequest
+import com.google.api.client.http.HttpRequestInitializer
 import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.json.gson.GsonFactory
 import com.google.api.services.drive.Drive
@@ -61,13 +63,12 @@ class DriveManager(private val context: Context) {
     private var accountName: String? = null
 
     /**
-     * HTTP transport with timeouts to prevent indefinite hangs.
+     * HttpRequestInitializer that sets timeouts on every request
+     * to prevent indefinite hangs.
      */
-    private val httpTransport: NetHttpTransport by lazy {
-        NetHttpTransport.Builder()
-            .setConnectTimeout(30_000)  // 30 seconds to connect
-            .setReadTimeout(60_000)     // 60 seconds to read
-            .build()
+    private val timeoutInitializer = HttpRequestInitializer { request: HttpRequest ->
+        request.connectTimeout = 30_000  // 30 seconds to connect
+        request.readTimeout = 60_000     // 60 seconds to read
     }
 
     /**
@@ -104,11 +105,12 @@ class DriveManager(private val context: Context) {
         getCredential().selectedAccountName = selectedAccountName
 
         driveService = Drive.Builder(
-            httpTransport,
+            NetHttpTransport(),
             GsonFactory.getDefaultInstance(),
             getCredential()
         )
             .setApplicationName("Admin CointabPro")
+            .setHttpRequestInitializer(timeoutInitializer)
             .build()
 
         // Save account for next launch
