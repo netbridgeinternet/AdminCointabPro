@@ -1,12 +1,13 @@
 package com.urbancointabpro.admin.drive
 
-import android.accounts.AccountManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
+import com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException
 import com.google.api.client.http.ByteArrayContent
+import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.json.gson.GsonFactory
 import com.google.api.services.drive.Drive
 import com.google.api.services.drive.DriveScopes
@@ -15,7 +16,9 @@ import com.google.api.services.drive.model.Permission
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.urbancointabpro.admin.pairing.PairingQRData
+import java.net.SocketTimeoutException
 import java.util.Collections
+import java.util.concurrent.TimeUnit
 
 data class DeviceInfo(
     val id: String,
@@ -34,6 +37,12 @@ data class PhotoInfo(
     val webViewLink: String?
 )
 
+/**
+ * Special exception thrown when Google needs user consent for Drive access.
+ * The calling code MUST launch the intent from this exception to show the consent screen.
+ */
+class DriveConsentRequiredException(val consentIntent: Intent) : Exception("Google Drive consent required")
+
 class DriveManager(private val context: Context) {
     companion object {
         private const val TAG = "DriveManager"
@@ -42,6 +51,7 @@ class DriveManager(private val context: Context) {
         const val MIME_IMAGE = "image/jpeg"
         const val PREFS_NAME = "admin_cointabpro_prefs"
         const val KEY_ACCOUNT_NAME = "account_name"
+        const val REQUEST_CODE_CONSENT = 9002
     }
 
     private var driveService: Drive? = null
@@ -51,9 +61,17 @@ class DriveManager(private val context: Context) {
     private var accountName: String? = null
 
     /**
+     * HTTP transport with timeouts to prevent indefinite hangs.
+     */
+    private val httpTransport: NetHttpTransport by lazy {
+        NetHttpTransport.Builder()
+            .setConnectTimeout(30_000)  // 30 seconds to connect
+            .setReadTimeout(60_000)     // 60 seconds to read
+            .build()
+    }
+
+    /**
      * Get or create the GoogleAccountCredential for Drive API access.
-     * This handles OAuth consent automatically — no Google Cloud Console
-     * OAuth client configuration needed.
      */
     fun getCredential(): GoogleAccountCredential {
         if (credential == null) {
@@ -73,8 +91,6 @@ class DriveManager(private val context: Context) {
 
     /**
      * Returns an Intent to launch the account picker.
-     * This is GoogleAccountCredential's built-in picker — works without
-     * any Google Cloud Console configuration.
      */
     fun getAccountPickerIntent(): Intent {
         return getCredential().newChooseAccountIntent()
@@ -88,7 +104,7 @@ class DriveManager(private val context: Context) {
         getCredential().selectedAccountName = selectedAccountName
 
         driveService = Drive.Builder(
-            com.google.api.client.http.javanet.NetHttpTransport(),
+            httpTransport,
             GsonFactory.getDefaultInstance(),
             getCredential()
         )
@@ -157,18 +173,39 @@ class DriveManager(private val context: Context) {
     }
 
     /**
+     * Execute a Drive API call, catching UserRecoverableAuthIOException
+     * and wrapping it in DriveConsentRequiredException so the UI can
+     * launch the consent intent.
+     */
+    private fun <T> driveExecute(block: () -> T): T {
+        return try {
+            block()
+        } catch (e: UserRecoverableAuthIOException) {
+            Log.w(TAG, "OAuth consent required: ${e.message}")
+            throw DriveConsentRequiredException(e.intent)
+        } catch (e: SocketTimeoutException) {
+            Log.e(TAG, "Drive API timeout: ${e.message}")
+            throw java.io.IOException("Connection timed out. Please check your internet connection and try again.")
+        }
+    }
+
+    /**
      * Create the root "CointabPro Photos" folder if it doesn't exist.
      * Returns the folder ID.
+     *
+     * Throws DriveConsentRequiredException if OAuth consent is needed.
      */
     suspend fun ensureRootFolder(): String = withContext(Dispatchers.IO) {
         val drive = driveService ?: throw IllegalStateException("Drive not initialized")
 
         // Check if folder already exists
-        val existing = drive.files().list()
-            .setQ("name='${ROOT_FOLDER_NAME}' and mimeType='${MIME_FOLDER}' and trashed=false and 'me' in owners")
-            .setSpaces("drive")
-            .setFields("files(id, name)")
-            .execute()
+        val existing = driveExecute {
+            drive.files().list()
+                .setQ("name='${ROOT_FOLDER_NAME}' and mimeType='${MIME_FOLDER}' and trashed=false and 'me' in owners")
+                .setSpaces("drive")
+                .setFields("files(id, name)")
+                .execute()
+        }
 
         if (existing.files.isNotEmpty()) {
             rootFolderId = existing.files[0].id
@@ -189,15 +226,21 @@ class DriveManager(private val context: Context) {
             name = ROOT_FOLDER_NAME
             mimeType = MIME_FOLDER
         }
-        val folder = drive.files().create(metadata)
-            .setFields("id, name, webViewLink")
-            .execute()
+        val folder = driveExecute {
+            drive.files().create(metadata)
+                .setFields("id, name, webViewLink")
+                .execute()
+        }
 
         rootFolderId = folder.id
         Log.i(TAG, "Created root folder: $rootFolderId")
 
         // Share folder: allow anyone with link to upload
-        shareFolderForUpload(rootFolderId!!)
+        try {
+            shareFolderForUpload(rootFolderId!!)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to share folder: ${e.message}")
+        }
 
         rootFolderId!!
     }
@@ -210,9 +253,11 @@ class DriveManager(private val context: Context) {
 
         try {
             // Check if already shared
-            val perms = drive.permissions().list(folderId)
-                .setFields("permissions(id, type, role)")
-                .execute()
+            val perms = driveExecute {
+                drive.permissions().list(folderId)
+                    .setFields("permissions(id, type, role)")
+                    .execute()
+            }
 
             val alreadyShared = perms.permissions.any {
                 it.type == "anyone" && it.role == "writer"
@@ -228,10 +273,14 @@ class DriveManager(private val context: Context) {
                 role = "writer"
                 allowFileDiscovery = false
             }
-            drive.permissions().create(folderId, permission)
-                .setFields("id")
-                .execute()
+            driveExecute {
+                drive.permissions().create(folderId, permission)
+                    .setFields("id")
+                    .execute()
+            }
             Log.i(TAG, "Folder shared: anyone with link can upload")
+        } catch (e: DriveConsentRequiredException) {
+            throw e // Re-throw consent exceptions
         } catch (e: Exception) {
             Log.e(TAG, "Failed to share folder: ${e.message}")
         }
@@ -248,11 +297,13 @@ class DriveManager(private val context: Context) {
             role = "writer"
             emailAddress = email
         }
-        drive.permissions().create(folderId, permission)
-            .setSendNotificationEmail(true)
-            .setEmailMessage("CointabPro Admin has shared a photo storage folder with you.")
-            .setFields("id")
-            .execute()
+        driveExecute {
+            drive.permissions().create(folderId, permission)
+                .setSendNotificationEmail(true)
+                .setEmailMessage("CointabPro Admin has shared a photo storage folder with you.")
+                .setFields("id")
+                .execute()
+        }
         Log.i(TAG, "Folder shared with: $email")
     }
 
@@ -278,11 +329,13 @@ class DriveManager(private val context: Context) {
         val folderName = "Device-$deviceId"
 
         // Check if device folder already exists
-        val existing = drive.files().list()
-            .setQ("name='$folderName' and '$rootId' in parents and mimeType='$MIME_FOLDER' and trashed=false")
-            .setSpaces("drive")
-            .setFields("files(id, name)")
-            .execute()
+        val existing = driveExecute {
+            drive.files().list()
+                .setQ("name='$folderName' and '$rootId' in parents and mimeType='$MIME_FOLDER' and trashed=false")
+                .setSpaces("drive")
+                .setFields("files(id, name)")
+                .execute()
+        }
 
         if (existing.files.isNotEmpty()) {
             val existingId = existing.files[0].id
@@ -296,9 +349,11 @@ class DriveManager(private val context: Context) {
             mimeType = MIME_FOLDER
             parents = listOf(rootId)
         }
-        val folder = drive.files().create(metadata)
-            .setFields("id, name, webViewLink")
-            .execute()
+        val folder = driveExecute {
+            drive.files().create(metadata)
+                .setFields("id, name, webViewLink")
+                .execute()
+        }
 
         Log.i(TAG, "Created device folder: ${folder.id} ($folderName)")
         folder.id
@@ -311,9 +366,11 @@ class DriveManager(private val context: Context) {
         val drive = driveService ?: return@withContext null
 
         try {
-            val file = drive.files().get(folderId)
-                .setFields("webViewLink")
-                .execute()
+            val file = driveExecute {
+                drive.files().get(folderId)
+                    .setFields("webViewLink")
+                    .execute()
+            }
             file.webViewLink
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get folder URL: ${e.message}")
@@ -353,21 +410,25 @@ class DriveManager(private val context: Context) {
         val folderId = rootFolderId ?: ensureRootFolder()
         val drive = driveService ?: return@withContext emptyList()
 
-        val result = drive.files().list()
-            .setQ("'$folderId' in parents and mimeType='$MIME_FOLDER' and trashed=false")
-            .setSpaces("drive")
-            .setFields("files(id, name)")
-            .setOrderBy("name")
-            .execute()
+        val result = driveExecute {
+            drive.files().list()
+                .setQ("'$folderId' in parents and mimeType='$MIME_FOLDER' and trashed=false")
+                .setSpaces("drive")
+                .setFields("files(id, name)")
+                .setOrderBy("name")
+                .execute()
+        }
 
         result.files.map { folder ->
-            val photos = drive.files().list()
-                .setQ("'${folder.id}' in parents and mimeType='$MIME_IMAGE' and trashed=false")
-                .setSpaces("drive")
-                .setFields("files(id, name, modifiedTime, thumbnailLink)")
-                .setOrderBy("modifiedTime desc")
-                .setPageSize(1)
-                .execute()
+            val photos = driveExecute {
+                drive.files().list()
+                    .setQ("'${folder.id}' in parents and mimeType='$MIME_IMAGE' and trashed=false")
+                    .setSpaces("drive")
+                    .setFields("files(id, name, modifiedTime, thumbnailLink)")
+                    .setOrderBy("modifiedTime desc")
+                    .setPageSize(1)
+                    .execute()
+            }
 
             val lastPhoto = photos.files.firstOrNull()
 
@@ -388,13 +449,15 @@ class DriveManager(private val context: Context) {
     suspend fun listPhotos(deviceFolderId: String, pageSize: Int = 50): List<PhotoInfo> = withContext(Dispatchers.IO) {
         val drive = driveService ?: return@withContext emptyList()
 
-        val result = drive.files().list()
-            .setQ("'$deviceFolderId' in parents and mimeType='$MIME_IMAGE' and trashed=false")
-            .setSpaces("drive")
-            .setFields("files(id, name, modifiedTime, thumbnailLink, webViewLink)")
-            .setOrderBy("modifiedTime desc")
-            .setPageSize(pageSize)
-            .execute()
+        val result = driveExecute {
+            drive.files().list()
+                .setQ("'$deviceFolderId' in parents and mimeType='$MIME_IMAGE' and trashed=false")
+                .setSpaces("drive")
+                .setFields("files(id, name, modifiedTime, thumbnailLink, webViewLink)")
+                .setOrderBy("modifiedTime desc")
+                .setPageSize(pageSize)
+                .execute()
+        }
 
         result.files.map { file ->
             PhotoInfo(
@@ -414,9 +477,11 @@ class DriveManager(private val context: Context) {
         val drive = driveService ?: return@withContext null
 
         try {
-            drive.files().get(fileId)
-                .executeMediaAsInputStream()
-                .readBytes()
+            driveExecute {
+                drive.files().get(fileId)
+                    .executeMediaAsInputStream()
+                    .readBytes()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to download photo: ${e.message}")
             null
@@ -440,7 +505,9 @@ class DriveManager(private val context: Context) {
 
         try {
             if (lastChangeToken == null) {
-                val tokenResponse = drive.changes().getStartPageToken().execute()
+                val tokenResponse = driveExecute {
+                    drive.changes().getStartPageToken().execute()
+                }
                 lastChangeToken = tokenResponse.startPageToken
                 Log.i(TAG, "Initial change token: $lastChangeToken")
                 return@withContext 0
@@ -450,9 +517,11 @@ class DriveManager(private val context: Context) {
             var pageToken = lastChangeToken
 
             while (pageToken != null) {
-                val changes = drive.changes().list(pageToken)
-                    .setFields("nextPageToken, newStartPageToken, changes(fileId, file(name, parents, mimeType))")
-                    .execute()
+                val changes = driveExecute {
+                    drive.changes().list(pageToken)
+                        .setFields("nextPageToken, newStartPageToken, changes(fileId, file(name, parents, mimeType))")
+                        .execute()
+                }
 
                 for (change in changes.changes ?: emptyList()) {
                     val file = change.file
@@ -474,6 +543,8 @@ class DriveManager(private val context: Context) {
             }
 
             changeCount
+        } catch (e: DriveConsentRequiredException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Poll error: ${e.message}")
             0
