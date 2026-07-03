@@ -21,8 +21,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.urbancointabpro.admin.pairing.PairingQRData
 import java.net.SocketTimeoutException
+import java.io.IOException
 import java.util.Collections
-import java.util.concurrent.TimeUnit
 
 data class DeviceInfo(
     val id: String,
@@ -198,7 +198,7 @@ class DriveManager(private val context: Context) {
         } catch (e: SocketTimeoutException) {
             Log.e(TAG, "Drive API timeout: ${e.message}")
             throw IOException("Connection timed out. Please check your internet connection and try again.")
-        } catch (e: java.io.IOException) {
+        } catch (e: IOException) {
             // Generic IO errors — often wraps auth failures on some devices
             Log.e(TAG, "Drive IO error: ${e.javaClass.simpleName}: ${e.message}")
             // Check if the cause is a UserRecoverableAuthIOException
