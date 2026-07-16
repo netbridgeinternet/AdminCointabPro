@@ -1,6 +1,8 @@
 package com.urbancointabpro.admin.ui.screens
 
 import android.app.Activity
+import android.content.Intent
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,12 +27,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.zxing.integration.android.IntentIntegrator
+import com.urbancointabpro.admin.drive.DriveConsentRequiredException
 import com.urbancointabpro.admin.drive.DriveManager
 import com.urbancointabpro.admin.firestore.FirestoreHelper
 import com.urbancointabpro.admin.pairing.KioskQRData
 import com.urbancointabpro.admin.pairing.QRPairingManager
 import com.urbancointabpro.admin.ui.theme.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,54 +57,69 @@ fun PairDeviceScreen(
     var pairedFolderUrl by remember { mutableStateOf("") }
     var showManualEntry by remember { mutableStateOf(false) }
 
-    // QR Scanner launcher
+    // QR Scanner launcher — handle ALL result codes (ZXing returns RESULT_OK on success)
     val qrScannerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
+        try {
             val scanResult = IntentIntegrator.parseActivityResult(
                 result.resultCode, result.data
             )
             val qrContent = scanResult?.contents
             if (qrContent.isNullOrBlank()) {
-                pairingError = "No QR code detected"
+                pairingError = "No QR code detected or scan cancelled"
                 return@rememberLauncherForActivityResult
             }
 
+            Log.i("PairDevice", "QR scanned: $qrContent")
             val kioskData = qrManager.parseKioskQR(qrContent)
             if (kioskData != null) {
                 scannedDeviceId = kioskData.deviceId
                 pairingError = null
             } else {
-                pairingError = "Invalid QR code format. Expected kiosk pairing QR."
+                // Maybe it's a plain device ID from the QR
+                pairingError = "Invalid QR code format. Try entering the Device ID manually."
             }
+        } catch (e: Exception) {
+            Log.e("PairDevice", "QR scan result parsing failed", e)
+            pairingError = "QR scan error: ${e.message}"
         }
     }
 
-    // Auto-pair when device ID is set (from scan)
+    // Auto-pair when device ID is set (from scan or manual entry)
     LaunchedEffect(scannedDeviceId) {
         val deviceId = scannedDeviceId ?: return@LaunchedEffect
         if (deviceId.isNotBlank() && !isPairing && !pairingSuccess) {
             isPairing = true
             pairingError = null
             try {
-                val rootFolderId = driveManager.ensureRootFolder()
-                val deviceFolderId = driveManager.createDeviceFolder(deviceId)
-                val folderUrl = driveManager.getFolderWebUrl(deviceFolderId) ?: ""
+                withTimeout(60_000L) {
+                    val rootFolderId = driveManager.ensureRootFolder()
+                    val deviceFolderId = driveManager.createDeviceFolder(deviceId)
+                    val folderUrl = driveManager.getFolderWebUrl(deviceFolderId) ?: ""
 
-                // Write pairing data to Firestore
-                val adminEmail = driveManager.getAccountEmail() ?: ""
-                val result = firestoreHelper.writePairingData(deviceId, deviceFolderId, adminEmail)
+                    // Write pairing data to Firestore
+                    val adminEmail = driveManager.getAccountEmail() ?: ""
+                    val result = firestoreHelper.writePairingData(deviceId, deviceFolderId, adminEmail)
 
-                if (result.isFailure) {
-                    pairingError = "Drive folder created, but failed to sync to cloud: ${result.exceptionOrNull()?.message}"
+                    if (result.isFailure) {
+                        pairingError = "Drive folder created, but failed to sync to cloud: ${result.exceptionOrNull()?.message}"
+                    }
+
+                    pairedFolderId = deviceFolderId
+                    pairedFolderUrl = folderUrl
+                    pairingSuccess = true
                 }
-
-                pairedFolderId = deviceFolderId
-                pairedFolderUrl = folderUrl
-                pairingSuccess = true
+            } catch (e: DriveConsentRequiredException) {
+                pairingError = "Drive permission lost. Please sign out and sign in again."
+                Log.e("PairDevice", "Consent required", e)
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                pairingError = "Pairing timed out. Check your internet connection and try again."
+                Log.e("PairDevice", "Timeout", e)
             } catch (e: Exception) {
-                pairingError = "Pairing failed: ${e.message}"
+                val detail = e.message ?: "${e.javaClass.simpleName}: (no detail)"
+                pairingError = "Pairing failed: $detail"
+                Log.e("PairDevice", "Pairing failed", e)
             }
             isPairing = false
         }
@@ -168,20 +187,22 @@ fun PairDeviceScreen(
                         Spacer(Modifier.height(16.dp))
 
                         // Open Drive folder button
-                        if (pairedFolderUrl.isNotBlank()) {
-                            Button(
-                                onClick = {
+                        Button(
+                            onClick = {
+                                try {
                                     val intent = driveManager.getOpenFolderIntent(pairedFolderId)
                                     context.startActivity(intent)
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Accent)
-                            ) {
-                                Icon(Icons.Filled.FolderOpen, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Open in Google Drive", fontWeight = FontWeight.SemiBold)
-                            }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Could not open Drive: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                        ) {
+                            Icon(Icons.Filled.FolderOpen, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Open in Google Drive", fontWeight = FontWeight.SemiBold)
                         }
 
                         Spacer(Modifier.height(12.dp))
@@ -253,12 +274,17 @@ fun PairDeviceScreen(
                         Spacer(Modifier.height(16.dp))
                         Button(
                             onClick = {
-                                val integrator = IntentIntegrator(context as Activity)
-                                integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
-                                integrator.setPrompt("Scan the QR code on the kiosk's Cloud tab")
-                                integrator.setBeepEnabled(true)
-                                integrator.setOrientationLocked(false)
-                                qrScannerLauncher.launch(integrator.createScanIntent())
+                                try {
+                                    val integrator = IntentIntegrator(context as Activity)
+                                    integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+                                    integrator.setPrompt("Scan the QR code on the kiosk's Cloud tab")
+                                    integrator.setBeepEnabled(true)
+                                    integrator.setOrientationLocked(false)
+                                    qrScannerLauncher.launch(integrator.createScanIntent())
+                                } catch (e: Exception) {
+                                    Log.e("PairDevice", "Failed to launch scanner", e)
+                                    pairingError = "Camera error: ${e.message}. Try entering Device ID manually."
+                                }
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
