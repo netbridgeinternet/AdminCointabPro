@@ -100,6 +100,14 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-firestore")
 
+    // gRPC (required by Firebase Firestore 25.x - without these, Firestore crashes)
+    implementation("io.grpc:grpc-core:1.62.2")
+    implementation("io.grpc:grpc-android:1.62.2")
+    implementation("io.grpc:grpc-okhttp:1.62.2")
+    implementation("io.grpc:grpc-protobuf-lite:1.62.2")
+    implementation("io.grpc:grpc-stub:1.62.2")
+    implementation("javax.annotation:javax.annotation-api:1.3.2")
+
     // Coil for image loading
     implementation("io.coil-kt:coil-compose:2.7.0")
 
