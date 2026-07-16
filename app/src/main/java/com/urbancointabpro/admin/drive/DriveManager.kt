@@ -61,6 +61,12 @@ class DriveManager(private val context: Context) {
         const val REQUEST_CODE_CONSENT = 9002
         // The scope string for GoogleAuthUtil.getToken()
         private val DRIVE_SCOPE = DriveScopes.DRIVE
+
+        // Service account email for Kiosk app — the service account is created
+        // in the newurbancointabpro Google Cloud project. When a device folder
+        // is created, it is shared with this email so the Kiosk can upload
+        // screenshots via the service account (no user sign-in needed on Kiosk).
+        const val SERVICE_ACCOUNT_EMAIL = "kiosk-drive-uploader@newurbancointabpro.iam.gserviceaccount.com"
     }
 
     private var driveService: Drive? = null
@@ -348,9 +354,28 @@ class DriveManager(private val context: Context) {
 
     /**
      * Share folder with a specific email (for Service Account pairing).
+     * @param sendNotification Whether to send a notification email (false for service accounts)
      */
-    suspend fun shareFolderWithEmail(folderId: String, email: String) = withContext(Dispatchers.IO) {
+    suspend fun shareFolderWithEmail(folderId: String, email: String, sendNotification: Boolean = true) = withContext(Dispatchers.IO) {
         val drive = driveService ?: throw IllegalStateException("Drive not initialized")
+
+        // Check if already shared with this email
+        try {
+            val perms = driveExecute {
+                drive.permissions().list(folderId)
+                    .setFields("permissions(id, type, role, emailAddress)")
+                    .execute()
+            }
+            val alreadyShared = perms.permissions.any {
+                it.type == "user" && it.emailAddress == email
+            }
+            if (alreadyShared) {
+                Log.i(TAG, "Folder already shared with: $email")
+                return@withContext
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not check existing permissions: ${e.message}")
+        }
 
         val permission = Permission().apply {
             type = "user"
@@ -359,12 +384,29 @@ class DriveManager(private val context: Context) {
         }
         driveExecute {
             drive.permissions().create(folderId, permission)
-                .setSendNotificationEmail(true)
-                .setEmailMessage("CointabPro Admin has shared a photo storage folder with you.")
+                .setSendNotificationEmail(sendNotification)
+                .apply {
+                    if (sendNotification) {
+                        setEmailMessage("CointabPro Admin has shared a photo storage folder with you.")
+                    }
+                }
                 .setFields("id")
                 .execute()
         }
-        Log.i(TAG, "Folder shared with: $email")
+        Log.i(TAG, "Folder shared with: $email (notification=$sendNotification)")
+    }
+
+    /**
+     * Share a device folder with the Kiosk service account.
+     * This allows the Kiosk app to upload screenshots without user sign-in.
+     */
+    suspend fun shareWithServiceAccount(folderId: String) {
+        try {
+            shareFolderWithEmail(folderId, SERVICE_ACCOUNT_EMAIL, sendNotification = false)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to share folder with service account: ${e.message}")
+            // Don't throw — the folder still works with user account auth
+        }
     }
 
     /**
@@ -399,6 +441,14 @@ class DriveManager(private val context: Context) {
         if (existing.files.isNotEmpty()) {
             val existingId = existing.files[0].id
             Log.i(TAG, "Device folder already exists: $existingId")
+
+            // Ensure service account has access (for folders created before SA support)
+            try {
+                shareWithServiceAccount(existingId)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not share existing folder with SA: ${e.message}")
+            }
+
             return@withContext existingId
         }
 
@@ -414,6 +464,15 @@ class DriveManager(private val context: Context) {
         }
 
         Log.i(TAG, "Created device folder: ${folder.id} ($folderName)")
+
+        // Share the new folder with the service account so the Kiosk
+        // can upload screenshots without user sign-in
+        try {
+            shareWithServiceAccount(folder.id)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not share new folder with SA: ${e.message}")
+        }
+
         folder.id
     }
 

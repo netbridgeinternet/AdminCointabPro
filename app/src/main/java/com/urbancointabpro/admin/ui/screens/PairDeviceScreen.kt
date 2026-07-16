@@ -184,6 +184,22 @@ fun PairDeviceScreen(
                             fontSize = 12.sp,
                             color = TextSecondary
                         )
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .background(Color(0xFF1B3A1B).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Icon(Icons.Filled.VerifiedUser, null, tint = AccentGreen, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "Service account has upload access",
+                                fontSize = 10.sp,
+                                color = AccentGreen.copy(alpha = 0.8f),
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                         Spacer(Modifier.height(16.dp))
 
                         // Open Drive folder button
@@ -412,7 +428,7 @@ fun PairDeviceScreen(
                         ) {
                             CircularProgressIndicator(color = Accent)
                             Spacer(Modifier.height(12.dp))
-                            Text("Creating Drive folder & syncing...", color = TextSecondary)
+                            Text("Creating Drive folder & sharing with service account...", color = TextSecondary)
                         }
                     }
                 }
