@@ -10,6 +10,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.activity.compose.BackHandler
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.urbancointabpro.admin.drive.DriveManager
 import com.urbancointabpro.admin.ui.screens.*
@@ -36,6 +38,20 @@ class MainActivity : ComponentActivity() {
 fun AdminApp() {
     val navController = rememberNavController()
     val driveManager = remember { DriveManager(navController.context) }
+
+    // Track current route to handle back navigation properly
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = currentBackStackEntry?.destination?.route
+
+    // Root screens — pressing back should NOT close the app
+    // Instead, show a confirmation or do nothing
+    val rootRoutes = setOf("signin", "setup", "dashboard")
+
+    BackHandler(enabled = currentRoute in rootRoutes) {
+        // On root screens, don't close the app on back press
+        // Move to background instead (like home button)
+        // This prevents accidental app closure
+    }
 
     // Auto-initialize Drive if account was previously saved
     LaunchedEffect(Unit) {

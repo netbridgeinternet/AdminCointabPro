@@ -6,8 +6,8 @@ import android.util.Log
 class AdminApp : Application() {
     companion object {
         private const val TAG = "AdminCointabPro"
-        const val VERSION_NAME = "1.3.0"
-        const val VERSION_CODE = 5
+        const val VERSION_NAME = "1.3.1"
+        const val VERSION_CODE = 6
     }
 
     override fun onCreate() {
