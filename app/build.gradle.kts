@@ -22,8 +22,8 @@ android {
         applicationId = "com.urbancointabpro.admin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -66,7 +66,23 @@ android {
         resources {
             merges += "META-INF/INDEX.LIST"
             merges += "META-INF/DEPENDENCIES"
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+}
+
+// Force gRPC version to match Firestore 25.x requirements
+configurations.all {
+    resolutionStrategy {
+        force("io.grpc:grpc-core:1.64.2")
+        force("io.grpc:grpc-android:1.64.2")
+        force("io.grpc:grpc-okhttp:1.64.2")
+        force("io.grpc:grpc-protobuf-lite:1.64.2")
+        force("io.grpc:grpc-stub:1.64.2")
+        force("io.grpc:grpc-api:1.64.2")
+        force("io.grpc:grpc-protobuf:1.64.2")
+        force("io.grpc:grpc-context:1.64.2")
+        force("io.grpc:grpc-codegen:1.64.2")
     }
 }
 
@@ -101,11 +117,12 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore")
 
     // gRPC (required by Firebase Firestore 25.x - without these, Firestore crashes)
-    implementation("io.grpc:grpc-core:1.62.2")
-    implementation("io.grpc:grpc-android:1.62.2")
-    implementation("io.grpc:grpc-okhttp:1.62.2")
-    implementation("io.grpc:grpc-protobuf-lite:1.62.2")
-    implementation("io.grpc:grpc-stub:1.62.2")
+    implementation("io.grpc:grpc-api:1.64.2")
+    implementation("io.grpc:grpc-core:1.64.2")
+    implementation("io.grpc:grpc-android:1.64.2")
+    implementation("io.grpc:grpc-okhttp:1.64.2")
+    implementation("io.grpc:grpc-protobuf-lite:1.64.2")
+    implementation("io.grpc:grpc-stub:1.64.2")
     implementation("javax.annotation:javax.annotation-api:1.3.2")
 
     // Coil for image loading
