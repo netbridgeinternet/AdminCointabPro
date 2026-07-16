@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.urbancointabpro.admin.AdminApp
 import com.urbancointabpro.admin.drive.DriveManager
 import com.urbancointabpro.admin.service.DriveSyncService
 import com.urbancointabpro.admin.ui.theme.*
@@ -172,6 +173,25 @@ fun SettingsScreen(
                             Spacer(Modifier.width(8.dp))
                             Text("Share Folder")
                         }
+                    }
+                }
+            }
+
+            // ── App Version Card ──────────────────────────────
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.Info, null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("App Version", fontWeight = FontWeight.SemiBold, color = TextPrimary, fontSize = 13.sp)
+                        Text("v${AdminApp.VERSION_NAME} (Build ${AdminApp.VERSION_CODE})", fontSize = 11.sp, color = TextSecondary)
                     }
                 }
             }

@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.urbancointabpro.admin.AdminApp
 import com.urbancointabpro.admin.drive.DeviceInfo
 import com.urbancointabpro.admin.drive.DriveManager
 import com.urbancointabpro.admin.ui.theme.*
@@ -71,7 +72,7 @@ fun DashboardScreen(
                 title = {
                     Column {
                         Text("Admin CointabPro", color = TextPrimary, fontWeight = FontWeight.Bold)
-                        Text("$totalPhotos photos • ${devices.size} devices", fontSize = 12.sp, color = TextSecondary)
+                        Text("v${AdminApp.VERSION_NAME} • $totalPhotos photos • ${devices.size} devices", fontSize = 12.sp, color = TextSecondary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Primary),

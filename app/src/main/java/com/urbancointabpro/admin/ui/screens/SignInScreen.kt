@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.urbancointabpro.admin.AdminApp
 import com.urbancointabpro.admin.drive.DriveManager
 import com.urbancointabpro.admin.ui.theme.*
 import kotlinx.coroutines.launch
@@ -142,6 +143,12 @@ fun SignInScreen(
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "v${AdminApp.VERSION_NAME}",
+                fontSize = 12.sp,
+                color = TextSecondary
             )
             Spacer(Modifier.height(8.dp))
             Text(
