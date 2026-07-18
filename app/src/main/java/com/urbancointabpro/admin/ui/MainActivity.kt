@@ -95,7 +95,16 @@ fun AdminApp() {
                 },
                 onPairDeviceClick = {
                     navController.navigate("pair_device")
+                },
+                onDriveQrClick = {
+                    navController.navigate("drive_qr")
                 }
+            )
+        }
+        composable("drive_qr") {
+            DriveFolderQrScreen(
+                driveManager = driveManager,
+                onBack = { navController.popBackStack() }
             )
         }
         composable("pair_device") {

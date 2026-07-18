@@ -34,7 +34,8 @@ fun DashboardScreen(
     driveManager: DriveManager,
     onDeviceClick: (String, String) -> Unit,
     onSettingsClick: () -> Unit,
-    onPairDeviceClick: () -> Unit
+    onPairDeviceClick: () -> Unit,
+    onDriveQrClick: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     var devices by remember { mutableStateOf<List<DeviceInfo>>(emptyList()) }
@@ -77,6 +78,9 @@ fun DashboardScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Primary),
                 actions = {
+                    IconButton(onClick = onDriveQrClick) {
+                        Icon(Icons.Filled.QrCode2, "Drive Folder QR", tint = TextPrimary)
+                    }
                     IconButton(onClick = { refresh() }) {
                         Icon(Icons.Filled.Refresh, "Refresh", tint = TextPrimary)
                     }
